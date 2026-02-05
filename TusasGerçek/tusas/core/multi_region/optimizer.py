@@ -89,7 +89,7 @@ class MultiRegionOptimizer:
         master_region = Region(master_region_id, len(master_sequence))
         master_region.sequence = master_sequence
         master_region.fitness_score = master_score
-        master_region.fitness_details = master_details
+        master_region.fitness_details = master_details.get("rules", {})  # Store simple rules dict
         master_region.is_master = True
         master_region.ply_mask = [True] * len(master_sequence)
         master_region.set_neighbors(self.graph.get_neighbors(master_region_id))
@@ -196,7 +196,7 @@ class MultiRegionOptimizer:
         # Region'ı güncelle
         region.set_sequence_from_mask(master_sequence, mask)
         region.fitness_score = final_score
-        region.fitness_details = final_details
+        region.fitness_details = final_details.get("rules", {})
         
         return region
 
