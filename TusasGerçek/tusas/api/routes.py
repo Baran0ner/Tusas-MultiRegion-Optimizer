@@ -7,6 +7,7 @@ from flask import Blueprint, jsonify, request, send_from_directory
 from ..core.dropoff_optimizer import DropOffOptimizer
 from ..core.laminate_optimizer import LaminateOptimizer
 from ..core.symmetry import check_symmetry_compatibility
+from ..core.multi_region import RegionGraph, MultiRegionOptimizer
 from ..state import get_zone_manager, set_zone_manager
 from ..zones.manager import ZoneManager
 from ..zones.models import Zone
@@ -503,4 +504,138 @@ def add_zone_from_dropoff():
     )
 
     return jsonify({"success": True, "zone": new_zone.to_dict(), "zones": zm.get_all_zones(), "transitions": zm.get_transitions()})
+
+
+# -----------------------------------------------------------------------------
+# Multi-Region Optimization Endpoints (2D Guide-Based Stacking)
+# -----------------------------------------------------------------------------
+
+
+# In-memory storage for multi-region sessions
+_multi_region_sessions = {}  # type: Dict[str, Dict]
+
+
+@bp.post("/multi_region/optimize")
+def multi_region_optimize():
+    """
+    2D çoklu bölge optimizasyonu.
+    
+    Input:
+    {
+        "session_id": "default",
+        "adjacency_map": {"R64": ["R48", "R32"], "R48": ["R64", "R56"], ...},
+        "ply_counts": {"0": 18, "90": 18, "45": 18, "-45": 18},
+        "master_region_id": "R64"  // optional, auto-select if not provided
+    }
+    """
+    payload = request.get_json(force=True, silent=True) or {}
+    session_id = payload.get("session_id", "default")
+    adjacency_map = payload.get("adjacency_map", {})
+    ply_counts = payload.get("ply_counts", {})
+    master_region_id = payload.get("master_region_id")  # Optional
+    
+    if not adjacency_map:
+        return jsonify({"error": "adjacency_map required"}), 400
+    
+    # Parse ply counts
+    ply_counts = {int(k): int(v) for k, v in ply_counts.items() if str(v).isdigit()} or {0: 18, 90: 18, 45: 18, -45: 18}
+    
+    try:
+        # Create region graph
+        graph = RegionGraph(adjacency_map)
+        
+        # Create optimizer
+        optimizer = MultiRegionOptimizer(graph, ply_counts)
+        
+        # Run optimization
+        start_time = time.time()
+        result = optimizer.optimize(master_region_id)
+        elapsed = time.time() - start_time
+        
+        # Store in session
+        _multi_region_sessions[session_id] = {
+            "optimizer": optimizer,
+            "result": result,
+            "timestamp": time.time(),
+        }
+        
+        # Add timing info
+        result["stats"]["total_api_time"] = round(elapsed, 2)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@bp.get("/multi_region/mpt")
+def get_mpt():
+    """Master Ply Table'ı döndür."""
+    session_id = request.args.get("session_id", "default")
+    
+    if session_id not in _multi_region_sessions:
+        return jsonify({"error": "Session not found. Run optimization first."}), 404
+    
+    session = _multi_region_sessions[session_id]
+    result = session.get("result", {})
+    
+    return jsonify({
+        "mpt": result.get("mpt"),
+        "table_string": session["optimizer"].get_mpt_table() if session.get("optimizer") else None,
+    })
+
+
+@bp.get("/multi_region/dropoff_map")
+def get_dropoff_map():
+    """Drop-off haritasını döndür."""
+    session_id = request.args.get("session_id", "default")
+    
+    if session_id not in _multi_region_sessions:
+        return jsonify({"error": "Session not found. Run optimization first."}), 404
+    
+    session = _multi_region_sessions[session_id]
+    result = session.get("result", {})
+    
+    return jsonify({
+        "dropoff_map": result.get("dropoff_map"),
+    })
+
+
+@bp.get("/multi_region/regions")
+def get_multi_regions():
+    """Tüm bölgeleri döndür."""
+    session_id = request.args.get("session_id", "default")
+    
+    if session_id not in _multi_region_sessions:
+        return jsonify({"error": "Session not found. Run optimization first."}), 404
+    
+    session = _multi_region_sessions[session_id]
+    result = session.get("result", {})
+    
+    return jsonify({
+        "regions": result.get("regions"),
+        "graph": result.get("graph"),
+        "stats": result.get("stats"),
+    })
+
+
+@bp.post("/multi_region/validate_adjacency")
+def validate_adjacency():
+    """Adjacency map'i doğrula ve graph bilgisi döndür."""
+    payload = request.get_json(force=True, silent=True) or {}
+    adjacency_map = payload.get("adjacency_map", {})
+    
+    if not adjacency_map:
+        return jsonify({"error": "adjacency_map required"}), 400
+    
+    try:
+        graph = RegionGraph(adjacency_map)
+        return jsonify({
+            "valid": True,
+            "graph": graph.to_dict(),
+            "suggested_master": graph.get_master_region_id(),
+        })
+    except Exception as e:
+        return jsonify({"valid": False, "error": str(e)}), 400
+
 

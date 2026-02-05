@@ -29,6 +29,9 @@ class LaminateOptimizer:
     DROP_OFF_ATTEMPTS = 3000
     ANGLE_TARGET_DROP_ATTEMPTS = 3000
 
+    # Maximum cache size to prevent memory issues
+    MAX_CACHE_SIZE = 50000
+
     def __init__(self, ply_counts: Dict[int, int]):
         self.ply_counts = ply_counts
         self.initial_pool = []  # type: List[int]
@@ -36,6 +39,28 @@ class LaminateOptimizer:
             self.initial_pool.extend([angle] * int(count))
 
         self.total_plies = len(self.initial_pool)
+        
+        # Fitness cache for memoization (sequence tuple -> (score, details))
+        self._fitness_cache = {}  # type: Dict[tuple, Tuple[float, Dict]]
+        self._cache_hits = 0
+        self._cache_misses = 0
+
+    def clear_cache(self) -> None:
+        """Clear the fitness cache and reset statistics."""
+        self._fitness_cache.clear()
+        self._cache_hits = 0
+        self._cache_misses = 0
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get cache statistics."""
+        total = self._cache_hits + self._cache_misses
+        hit_rate = (self._cache_hits / total * 100) if total > 0 else 0
+        return {
+            "cache_size": len(self._fitness_cache),
+            "cache_hits": self._cache_hits,
+            "cache_misses": self._cache_misses,
+            "hit_rate_percent": round(hit_rate, 2),
+        }
 
     def _is_symmetric(self, sequence: List[int]) -> bool:
         """Sequence simetrik mi kontrol et."""
@@ -326,21 +351,24 @@ class LaminateOptimizer:
             "max_run": int(max_run),
         }
 
-    def _check_grouping(self, sequence: List[int], max_group: int = 3) -> float:
-        """Rule 6: Grouping kontrolü - max 3 ply üst üste + toplam grouping minimize + 3'lü grup penalty."""
-        penalty = 0.0
-        max_group_found = 1
-        curr = 1
-        total_adjacent_pairs = 0  # Toplam yan yana aynı açı sayısı
+    def _check_grouping(self, sequence: List[int], max_group: int = 3, gstats: Optional[Dict[str, int]] = None) -> float:
+        """Rule 6: Grouping kontrolü - max 3 ply üst üste + toplam grouping minimize + 3'lü grup penalty.
+        
+        Args:
+            sequence: The laminate sequence
+            max_group: Maximum allowed consecutive plies
+            gstats: Pre-computed grouping stats (optional, to avoid redundant calculation)
+        """
         max_penalty = self.WEIGHTS["R6"]
-
-        for i in range(1, len(sequence)):
-            if sequence[i] == sequence[i - 1]:
-                curr += 1
-                total_adjacent_pairs += 1  # Her yan yana aynı açı bir grouping
-            else:
-                curr = 1
-            max_group_found = max(max_group_found, curr)
+        
+        # Use pre-computed stats if provided, otherwise compute
+        if gstats is None:
+            gstats = self._grouping_stats(sequence)
+        
+        penalty = 0.0
+        max_group_found = gstats["max_run"]
+        total_adjacent_pairs = gstats["adjacent_pairs"]
+        groups_of_3 = gstats["groups_len_3"]
 
         # Penalty 1: Max group > 3 ise büyük penalty (max_penalty'nin %25'i her fazla için)
         if max_group_found > max_group:
@@ -348,7 +376,6 @@ class LaminateOptimizer:
             penalty += excess * (max_penalty * 0.25)
 
         # Penalty 2: 3'lü gruplar için küçük penalty (ideal: 2'li veya daha az)
-        groups_of_3 = self._find_groups_of_size(sequence, 3)
         penalty += groups_of_3 * 1.0  # Her 3'lü grup için 1 puan penalty
 
         # Penalty 3: Toplam adjacent pairs'e göre küçük penalty
@@ -597,9 +624,12 @@ class LaminateOptimizer:
         return best_global, best_score
 
     def _local_search(self, sequence: List[int], max_iter: int = 100) -> Tuple[List[int], float]:
-        """Hill climbing: 3'lü grupları 2'liye düşürmeyi önceliklendir.
-        Normal zamanlarda Rule 4'ü korur, ama 3'lü grup azaltma için Rule 4'ü bozabilir."""
-        print("Phase 3: Local Search")
+        """Hill climbing with first-improvement strategy.
+        
+        Uses first-improvement instead of best-improvement for faster convergence.
+        Still prioritizes: 3'lü grup azaltma > grouping azaltma > score artışı.
+        """
+        print("Phase 3: Local Search (First-Improvement)")
 
         current = sequence[:]
         current_score, _ = self.calculate_fitness(current)
@@ -618,13 +648,15 @@ class LaminateOptimizer:
             improved = False
             n = len(current)
             half = n // 2
+            
+            # Randomize search order for diversity
+            indices = list(range(half))
+            random.shuffle(indices)
 
-            # AŞAMA 1: Rule 4'ü koruyan swap'ler
-            candidates_rule4_preserved = []
-            # AŞAMA 2: Rule 4'ü bozan ama 3'lü grup azaltan swap'ler
-            candidates_rule4_violated = []
-
-            for i in range(half):
+            # FIRST-IMPROVEMENT: İlk iyileştirmeyi bulunca uygula
+            for i in indices:
+                if improved:
+                    break
                 for j in range(i + 1, half):
                     candidate = current[:]
                     candidate[i], candidate[j] = candidate[j], candidate[i]
@@ -632,81 +664,53 @@ class LaminateOptimizer:
                     mirror_j = n - 1 - j
                     candidate[mirror_i], candidate[mirror_j] = candidate[mirror_j], candidate[mirror_i]
 
-                    candidate_score, _ = self.calculate_fitness(candidate)
-                    candidate_groupings = self._count_groupings(candidate)
-                    candidate_groups_of_3 = self._find_groups_of_size(candidate, 3)
-
-                    grouping_change = current_groupings - candidate_groupings
-                    groups_of_3_change = current_groups_of_3 - candidate_groups_of_3
-
                     # Rule 4 kontrolü: Başlangıç ve bitiş ±45 olmalı
                     rule4_preserved = (candidate[0] in [45, -45] and candidate[-1] in [45, -45])
+                    
+                    # Rule 4 bozuluyorsa hızlı atla (sadece 3'lü grup azaltıyorsa kabul)
+                    if not rule4_preserved:
+                        candidate_groups_of_3 = self._find_groups_of_size(candidate, 3)
+                        if candidate_groups_of_3 >= current_groups_of_3:
+                            continue
 
-                    # Öncelik sırası
-                    priority = (
-                        groups_of_3_change > 0,  # 3'lü grup azaltanlar en öncelikli
-                        grouping_change > 0,
-                        groups_of_3_change,  # Ne kadar 3'lü grup azalttı
-                        grouping_change,
-                        candidate_score,
-                    )
-
-                    candidate_data = (candidate, candidate_score, priority, grouping_change, groups_of_3_change)
-
-                    if rule4_preserved:
-                        # Rule 4 korunuyor - normal aday
-                        candidates_rule4_preserved.append(candidate_data)
-                    elif groups_of_3_change > 0:
-                        # Rule 4 bozuluyor AMA 3'lü grup azaltıyor - özel durum
-                        candidates_rule4_violated.append(candidate_data)
-                    # Diğer durumlar: Rule 4 bozuluyor ve 3'lü grup azaltmıyor - ATLA
-
-            # AŞAMA 1: Önce Rule 4'ü koruyan swap'leri dene
-            candidates_rule4_preserved.sort(key=lambda x: x[2], reverse=True)
-
-            for candidate, candidate_score, _priority, grouping_change, groups_of_3_change in candidates_rule4_preserved:
-                if candidate_score > current_score:
-                    current = candidate
-                    current_score = candidate_score
-                    current_groupings = self._count_groupings(candidate)
-                    current_groups_of_3 = self._find_groups_of_size(candidate, 3)
-                    improved = True
-                    improvements += 1
-                    print(
-                        "  Iteration {}: Improved to {:.2f} (Rule4 preserved), Groupings: {} ({:+d}), Groups of 3: {} ({:+d})".format(
-                            iteration,
-                            current_score,
-                            current_groupings,
-                            grouping_change,
-                            current_groups_of_3,
-                            groups_of_3_change,
-                        )
-                    )
-                    break
-
-            # AŞAMA 2: Eğer Rule 4 korunarak 3'lü grup azaltılamadıysa, Rule 4'ü bozan swap'leri dene
-            if not improved and candidates_rule4_violated:
-                candidates_rule4_violated.sort(key=lambda x: x[2], reverse=True)
-
-                for candidate, candidate_score, _priority, grouping_change, groups_of_3_change in candidates_rule4_violated:
-                    # Rule 4 bozuluyor ama 3'lü grup azaltıyor - kabul et (fitness fonksiyonu trade-off yapacak)
+                    candidate_score, _ = self.calculate_fitness(candidate)
+                    
+                    # İlk iyileştirmeyi kabul et
                     if candidate_score > current_score:
+                        candidate_groupings = self._count_groupings(candidate)
+                        candidate_groups_of_3 = self._find_groups_of_size(candidate, 3)
+                        grouping_change = current_groupings - candidate_groupings
+                        groups_of_3_change = current_groups_of_3 - candidate_groups_of_3
+                        
                         current = candidate
                         current_score = candidate_score
-                        current_groupings = self._count_groupings(candidate)
-                        current_groups_of_3 = self._find_groups_of_size(candidate, 3)
+                        current_groupings = candidate_groupings
+                        current_groups_of_3 = candidate_groups_of_3
                         improved = True
                         improvements += 1
-                        print(
-                            "  Iteration {}: Improved to {:.2f} (Rule4 violated for grouping reduction), Groupings: {} ({:+d}), Groups of 3: {} ({:+d})".format(
-                                iteration,
-                                current_score,
-                                current_groupings,
-                                grouping_change,
-                                current_groups_of_3,
-                                groups_of_3_change,
+                        
+                        if rule4_preserved:
+                            print(
+                                "  Iteration {}: Improved to {:.2f} (Rule4 preserved), Groupings: {} ({:+d}), Groups of 3: {} ({:+d})".format(
+                                    iteration,
+                                    current_score,
+                                    current_groupings,
+                                    grouping_change,
+                                    current_groups_of_3,
+                                    groups_of_3_change,
+                                )
                             )
-                        )
+                        else:
+                            print(
+                                "  Iteration {}: Improved to {:.2f} (Rule4 violated for grouping reduction), Groupings: {} ({:+d}), Groups of 3: {} ({:+d})".format(
+                                    iteration,
+                                    current_score,
+                                    current_groupings,
+                                    grouping_change,
+                                    current_groups_of_3,
+                                    groups_of_3_change,
+                                )
+                            )
                         break
 
             if not improved:
@@ -754,6 +758,15 @@ class LaminateOptimizer:
 
         print("\n" + "=" * 60)
         print("FINAL RESULT: {:.2f}/100 (in {:.2f}s)".format(final_score, total_time))
+        
+        # Print cache statistics
+        cache_stats = self.get_cache_stats()
+        print("Cache Stats: {} cached, {} hits, {} misses, {:.1f}% hit rate".format(
+            cache_stats["cache_size"],
+            cache_stats["cache_hits"],
+            cache_stats["cache_misses"],
+            cache_stats["hit_rate_percent"]
+        ))
         print("=" * 60)
 
         # Final details
@@ -766,8 +779,31 @@ class LaminateOptimizer:
 
     def calculate_fitness(self, sequence: List[int]):
         """
-        PDF kurallarına göre fitness hesapla.
+        PDF kurallarına göre fitness hesapla (with caching).
         Max score = 100 (tüm rule weights toplamı)
+        """
+        # Convert to tuple for hashing
+        seq_key = tuple(sequence)
+        
+        # Check cache first
+        if seq_key in self._fitness_cache:
+            self._cache_hits += 1
+            return self._fitness_cache[seq_key]
+        
+        self._cache_misses += 1
+        
+        # Calculate fitness
+        result = self._calculate_fitness_impl(sequence)
+        
+        # Store in cache (with size limit)
+        if len(self._fitness_cache) < self.MAX_CACHE_SIZE:
+            self._fitness_cache[seq_key] = result
+        
+        return result
+    
+    def _calculate_fitness_impl(self, sequence: List[int]):
+        """
+        Actual fitness calculation implementation.
         """
         WEIGHTS = self.WEIGHTS
 
@@ -842,10 +878,10 @@ class LaminateOptimizer:
             "reason": "Dağılım uniform değil" if penalty_r5 > 0 else "",
         }
 
-        # Rule 6: Grouping (max 3)
-        penalty_r6 = self._check_grouping(sequence, max_group=3)
-        score_r6 = max(0, WEIGHTS["R6"] - penalty_r6)
+        # Rule 6: Grouping (max 3) - compute stats once and reuse
         gstats = self._grouping_stats(sequence)
+        penalty_r6 = self._check_grouping(sequence, max_group=3, gstats=gstats)
+        score_r6 = max(0, WEIGHTS["R6"] - penalty_r6)
         if penalty_r6 > 0:
             # Sadece istenen sayılar: 2'li / 3'lü / 4+ grup adedi
             reason_r6 = "2'li grup: {}, 3'lü grup: {}, 4+ grup: {}".format(
