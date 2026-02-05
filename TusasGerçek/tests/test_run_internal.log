@@ -1,0 +1,126 @@
+
+--- Starting Multi-Region Optimization Test ---
+Detected Master Region: R64
+============================================================
+MULTI-REGION OPTIMIZATION
+============================================================
+Master Region: R64
+Total Regions: 6
+Mode: FAST
+
+Phase 1: Master Region Optimization
+Phase 3: Local Search (First-Improvement)
+  Initial score: 76.83, Groupings: 21, Groups of 3: 6
+  Iteration 0: Improved to 77.63 (Rule4 preserved), Groupings: 17 (+4), Groups of 3: 6 (+0)
+  Iteration 1: Improved to 80.05 (Rule4 preserved), Groupings: 15 (+2), Groups of 3: 4 (+2)
+  Iteration 2: Improved to 82.35 (Rule4 preserved), Groupings: 13 (+2), Groups of 3: 2 (+2)
+  Iteration 3: Improved to 82.45 (Rule4 preserved), Groupings: 13 (+0), Groups of 3: 2 (+0)
+  Iteration 4: Improved to 83.05 (Rule4 preserved), Groupings: 11 (+2), Groups of 3: 2 (+0)
+  Iteration 5: Improved to 86.63 (Rule4 preserved), Groupings: 13 (-2), Groups of 3: 2 (+0)
+  Iteration 6: Improved to 86.69 (Rule4 preserved), Groupings: 13 (+0), Groups of 3: 2 (+0)
+  Iteration 7: Improved to 86.74 (Rule4 preserved), Groupings: 13 (+0), Groups of 3: 2 (+0)
+  Iteration 8: Improved to 86.75 (Rule4 preserved), Groupings: 13 (+0), Groups of 3: 2 (+0)
+  Iteration 9: Improved to 88.82 (Rule4 preserved), Groupings: 13 (+0), Groups of 3: 0 (+2)
+  Iteration 10: Improved to 88.93 (Rule4 preserved), Groupings: 13 (+0), Groups of 3: 0 (+0)
+  Iteration 11: Improved to 89.33 (Rule4 preserved), Groupings: 11 (+2), Groups of 3: 0 (+0)
+  Iteration 12: Improved to 89.82 (Rule4 preserved), Groupings: 9 (+2), Groups of 3: 0 (+0)
+  Iteration 13: Improved to 90.47 (Rule4 preserved), Groupings: 9 (+0), Groups of 3: 0 (+0)
+  Iteration 14: Improved to 90.80 (Rule4 preserved), Groupings: 7 (+2), Groups of 3: 0 (+0)
+  Iteration 15: Improved to 91.36 (Rule4 preserved), Groupings: 7 (+0), Groups of 3: 0 (+0)
+  Iteration 16: Improved to 91.41 (Rule4 preserved), Groupings: 7 (+0), Groups of 3: 0 (+0)
+  Iteration 17: Improved to 91.89 (Rule4 preserved), Groupings: 5 (+2), Groups of 3: 0 (+0)
+  Iteration 18: Improved to 92.16 (Rule4 preserved), Groupings: 5 (+0), Groups of 3: 0 (+0)
+  Iteration 19: Improved to 92.45 (Rule4 preserved), Groupings: 3 (+2), Groups of 3: 0 (+0)
+  Iteration 20: Improved to 93.08 (Rule4 preserved), Groupings: 1 (+2), Groups of 3: 0 (+0)
+  Iteration 21: Improved to 93.44 (Rule4 preserved), Groupings: 1 (+0), Groups of 3: 0 (+0)
+  Iteration 22: Improved to 93.90 (Rule4 preserved), Groupings: 1 (+0), Groups of 3: 0 (+0)
+  Iteration 23: Improved to 94.13 (Rule4 preserved), Groupings: 1 (+0), Groups of 3: 0 (+0)
+  Iteration 24: Improved to 94.28 (Rule4 preserved), Groupings: 1 (+0), Groups of 3: 0 (+0)
+  Iteration 25: Improved to 94.38 (Rule4 preserved), Groupings: 1 (+0), Groups of 3: 0 (+0)
+  Iteration 26: Improved to 94.59 (Rule4 preserved), Groupings: 1 (+0), Groups of 3: 0 (+0)
+  Iteration 27: Improved to 94.65 (Rule4 preserved), Groupings: 1 (+0), Groups of 3: 0 (+0)
+  Iteration 28: Improved to 94.73 (Rule4 preserved), Groupings: 1 (+0), Groups of 3: 0 (+0)
+  Iteration 29: Improved to 94.96 (Rule4 preserved), Groupings: 1 (+0), Groups of 3: 0 (+0)
+  Final score: 94.96/100, Final groupings: 1, Final groups of 3: 0
+
+Phase 2: Region Drop-offs (Continuity-Aware)
+  Processing R56 (target: 56 plies)...
+    Result: 56 plies, fitness: 94.20
+  Processing R48 (target: 48 plies)...
+    Result: 48 plies, fitness: 92.85
+  Processing R32 (target: 32 plies)...
+    Result: 32 plies, fitness: 94.88
+  Processing R22 (target: 22 plies)...
+    Result: 22 plies, fitness: 91.85
+  Processing R16 (target: 16 plies)...
+    Result: 16 plies, fitness: 77.03
+
+Phase 3: Continuity Validation
+  OK: R16 <-> R48
+  OK: R48 <-> R64
+  OK: R16 <-> R32
+  OK: R22 <-> R48
+  OK: R32 <-> R48
+  OK: R22 <-> R56
+  OK: R22 <-> R64
+  OK: R32 <-> R64
+  OK: R48 <-> R56
+
+============================================================
+OPTIMIZATION COMPLETE
+Total time: 19.76s
+============================================================
+
+Optimization Stats:
+{'continuity_details': [{'edge': ['R16', 'R48'],
+                         'valid': True,
+                         'violations': []},
+                        {'edge': ['R48', 'R64'],
+                         'valid': True,
+                         'violations': []},
+                        {'edge': ['R16', 'R32'],
+                         'valid': True,
+                         'violations': []},
+                        {'edge': ['R22', 'R48'],
+                         'valid': True,
+                         'violations': []},
+                        {'edge': ['R32', 'R48'],
+                         'valid': True,
+                         'violations': []},
+                        {'edge': ['R22', 'R56'],
+                         'valid': True,
+                         'violations': []},
+                        {'edge': ['R22', 'R64'],
+                         'valid': True,
+                         'violations': []},
+                        {'edge': ['R32', 'R64'],
+                         'valid': True,
+                         'violations': []},
+                        {'edge': ['R48', 'R56'],
+                         'valid': True,
+                         'violations': []}],
+ 'continuity_valid': True,
+ 'master_fitness': 94.96000000000001,
+ 'master_region_id': 'R64',
+ 'total_regions': 6,
+ 'total_time_seconds': 19.76}
+Region R64: Target=64, Actual=64
+  Angles: {45: 16, -45: 16, 0: 16, 90: 16}
+  Balance Diff: 0
+Region R56: Target=56, Actual=56
+  Angles: {45: 14, -45: 14, 0: 12, 90: 16}
+  Balance Diff: 0
+Region R48: Target=48, Actual=48
+  Angles: {45: 12, -45: 14, 0: 6, 90: 16}
+  Balance Diff: 2
+Region R32: Target=32, Actual=32
+  Angles: {45: 8, -45: 8, 0: 6, 90: 10}
+  Balance Diff: 0
+Region R22: Target=22, Actual=22
+  Angles: {45: 4, -45: 4, 90: 10, 0: 4}
+  Balance Diff: 0
+Region R16: Target=16, Actual=16
+  Angles: {45: 2, -45: 2, 90: 10, 0: 2}
+  Balance Diff: 0
+
+Test passed successfully!

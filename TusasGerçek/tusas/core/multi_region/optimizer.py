@@ -171,9 +171,19 @@ class MultiRegionOptimizer:
         # Komşu bölgeleri kontrol et (continuity için)
         neighbor_constraints = self._get_neighbor_constraints(region_id)
         
+        # Collect forced drops from constraints (thicker neighbors)
+        # If a thicker neighbor dropped a ply (False), shorter region MUST also drop it
+        forced_drop_set = set()
+        for mask in neighbor_constraints.values():
+            for i, keep in enumerate(mask):
+                if not keep:
+                    forced_drop_set.add(i)
+        
+        fixed_drop_indices = sorted(list(forced_drop_set))
+        
         # Drop-off optimizer kullan
         drop_optimizer = DropOffOptimizer(master_sequence, self.base_optimizer)
-        new_sequence, score, dropped_indices = drop_optimizer.optimize_drop(target_ply_count)
+        new_sequence, score, dropped_indices = drop_optimizer.optimize_drop(target_ply_count, fixed_drop_indices=fixed_drop_indices)
         
         # Detayları hesapla
         final_score, final_details = self.base_optimizer.calculate_fitness(new_sequence)

@@ -16,7 +16,7 @@ class DropOffOptimizer:
         self.base_opt = base_optimizer
         self.total_plies = len(master_sequence)
 
-    def optimize_drop(self, target_ply: int) -> Tuple[List[int], float, List[int]]:
+    def optimize_drop(self, target_ply: int, fixed_drop_indices: List[int] = None) -> Tuple[List[int], float, List[int]]:
         """
         Drop-off optimization with odd/even ply support.
 
@@ -25,10 +25,26 @@ class DropOffOptimizer:
         - Odd → Odd: Symmetric drop (pairs), middle ply preserved
         - Odd → Even: Drop middle ply + symmetric pairs
         - Even → Odd: Break one pair - keep one as middle, drop its mirror
+        
+        Args:
+            target_ply: Target ply count
+            fixed_drop_indices: List of indices that MUST be dropped (from thicker neighbors)
         """
+        if fixed_drop_indices is None:
+            fixed_drop_indices = []
+            
         remove_cnt = self.total_plies - target_ply
         if remove_cnt <= 0:
             return self.master_sequence, 0.0, []
+            
+        # Validate fixed drops
+        if len(fixed_drop_indices) > remove_cnt:
+            print(f"Warning: Fixed drops ({len(fixed_drop_indices)}) > removes needed ({remove_cnt})")
+            # We must drop at least fixed ones, so target ply might be lower than requested
+            # But for now let's just proceed and maybe fail or clip
+            
+        # Current valid drops so far (from constraints)
+        current_drops = set(fixed_drop_indices)
 
         master_is_odd = self.total_plies % 2 == 1
         target_is_odd = target_ply % 2 == 1
@@ -43,6 +59,11 @@ class DropOffOptimizer:
         if master_is_odd and not target_is_odd:
             # Tek → Çift: Ortadaki ply'ı da drop et
             drop_middle = True
+            
+            # Eğer middle zaten fixed drops içindeyse, stratejiye uyuyor
+            if middle_idx in current_drops:
+                pass # Already handled
+                
             pairs_to_remove = (remove_cnt - 1) // 2
         elif not master_is_odd and target_is_odd:
             # Çift → Tek: Bir çifti kır - soldaki ortaya geçer, sağdaki drop edilir
@@ -59,14 +80,36 @@ class DropOffOptimizer:
         # External plies koruması: ilk 2 katmanı koru (pozisyon 0 ve 1)
         # Rule 4'e göre ilk 2 ve son 2 katman korunmalı
         search_indices = list(range(2, half_len))  # Pozisyon 0 ve 1 hariç
-
+        
+        # Fixed drop indices'i analize et
+        # Kaç çift fixed? Orta ply fixed mi?
+        fixed_count = len(current_drops)
+        
+        # Fixed drops simetrik olmalı
+        # Sol yarıdaki fixed pozisyonları bul
+        fixed_left = []
+        for idx in current_drops:
+            if idx < half_len:
+                fixed_left.append(idx)
+            elif idx == middle_idx:
+                # Middleware drop is fixed
+                if not drop_middle:
+                    # Strateji uyuşmazlığı, ama yapacak bir şey yok
+                    pass
+                    
+        # Calculate remaining pairs needed
+        # We need total `pairs_to_remove` pairs
+        # We already have `len(fixed_left)` pairs dropped (assuming symmetry)
+        pairs_needed = pairs_to_remove - len(fixed_left)
+        
         best_candidate = None
         best_key = None
         best_dropped = []
 
         attempts = self.base_opt.DROP_OFF_ATTEMPTS
+        
         for _ in range(attempts):
-            left_drops = []
+            left_drops = list(fixed_left) # Start with fixed drops
 
             # Çift → Tek: Bir çifti kırmak için pozisyon seç
             if break_pair_for_middle:
@@ -75,19 +118,26 @@ class DropOffOptimizer:
                 # Ortaya yakın bir pozisyon seç (sol yarının sonlarından)
                 # Bu pozisyondaki ply ortaya geçecek, mirror'ı drop edilecek
                 break_pair_idx = random.choice(search_indices)
-
+                
             # Normal çift drop pozisyonları seç
-            if pairs_to_remove > 0 and len(search_indices) > 0:
+            # Sadece eğer daha fazla çift lazımsa
+            if pairs_needed > 0 and len(search_indices) > 0:
                 # break_pair_idx zaten kullanıldıysa onu hariç tut
-                available_indices = [i for i in search_indices if i != break_pair_idx]
-                sample_size = min(pairs_to_remove, len(available_indices))
+                # fixed_left zaten kullanıldı, onları da hariç tut
+                available_indices = [i for i in search_indices if i != break_pair_idx and i not in current_drops]
+                
+                sample_size = min(pairs_needed, len(available_indices))
                 if sample_size > 0:
-                    left_drops = random.sample(available_indices, sample_size)
+                    random_drops = random.sample(available_indices, sample_size)
+                    left_drops.extend(random_drops)
                     left_drops.sort()
 
             # ✅ 1. NO GROUPING CHECK - Ardışık drop pozisyonları yasak
             # Drop pozisyonları birbirine çok yakın olmamalı (gruplama önleme)
-            if len(left_drops) > 1:
+            # Relax this check if drop density is high (> 45%) to avoid infinite loops
+            density = len(left_drops) / (len(search_indices) if search_indices else 1)
+            
+            if density < 0.45 and len(left_drops) > 1:
                 has_consecutive = any(left_drops[i + 1] - left_drops[i] == 1 for i in range(len(left_drops) - 1))
                 if has_consecutive:
                     continue  # Grouped drops = reddet
@@ -99,10 +149,14 @@ class DropOffOptimizer:
                 spacing_mean = np.mean(spacings)
                 spacing_std = np.std(spacings)
                 # Çok yüksek standart sapma = kötü dağılım (AVOID örneği gibi)
-                if spacing_std > spacing_mean * 0.7:  # Çok düzensiz dağılım
+                if spacing_mean > 0 and spacing_std > spacing_mean * 0.7:  # Çok düzensiz dağılım
                     continue
 
             all_drops = []
+            # Add fixed drops explicitly to all_drops to be safe, although left_drops should cover left half
+            # But we need to handle full sequence construction carefully
+            
+            # Use left_drops to construct all_drops
             for idx in left_drops:
                 all_drops.append(idx)
                 all_drops.append(self.total_plies - 1 - idx)
